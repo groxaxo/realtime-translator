@@ -1,0 +1,34 @@
+name: translator
+channels:
+  - conda-forge
+  - pytorch
+  - nvidia
+dependencies:
+  - python=3.10
+  - pip
+  - pytorch>=2.0
+  - pytorch-cuda=12.1 # Remove this line for CPU-only
+  - ffmpeg
+  - portaudio
+
+  # Development tools
+  - ipython
+  - pytest
+  - ruff
+
+  - pip:
+      # LiveKit Agents
+      - livekit-agents>=1.0.0
+      - livekit-plugins-openai>=1.0.0
+      - livekit-plugins-silero>=1.0.0
+
+      # Utilities
+      - python-dotenv>=1.0.0
+      - httpx>=0.27.0
+      - aiohttp>=3.9.0
+
+      # Development
+      - uv>=0.1.0
+# Environment activation script
+# Run: conda env create -f environment.yml
+# Activate: conda activate translator

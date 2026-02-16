@@ -1,0 +1,155 @@
+services:
+  # =============================================================================
+  # CORE INFRASTRUCTURE
+  # =============================================================================
+  
+  livekit:
+    image: livekit/livekit-server:latest
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+    command: --dev --bind "0.0.0.0"
+    networks:
+      - translator_network
+    restart: unless-stopped
+
+  # =============================================================================
+  # SPEECH-TO-TEXT (Parakeet TDT - Multilingual)
+  # =============================================================================
+  
+  parakeet:
+    build:
+      context: ../parakeet-tdt-0.6b-v3-fastapi-openai
+      dockerfile: Dockerfile.cpu
+    ports:
+      - "5092:5092"
+    volumes:
+      - parakeet-models:/app/models
+    networks:
+      - translator_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5092/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # =============================================================================
+  # TEXT-TO-SPEECH (Kokoro - CPU Mode)
+  # =============================================================================
+  
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    ports:
+      - "8881:8880"
+    networks:
+      - translator_network
+    restart: unless-stopped
+
+  # =============================================================================
+  # TRANSLATION LLM (LLaMA.cpp)
+  # =============================================================================
+  
+  llama_cpp:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "11434"
+      - --hf-repo
+      - "${LLAMA_HF_REPO:-unsloth/Qwen3-4B-Instruct-2507-GGUF}"
+      - --alias
+      - "${LLAMA_MODEL_ALIAS:-qwen3-4b}"
+      - --ctx-size
+      - "${LLAMA_CTX_SIZE:-8192}"
+    ports:
+      - "${LLAMA_HOST_PORT:-11437}:11434"
+    volumes:
+      - llama-models:/models
+    environment:
+      - XDG_CACHE_HOME=/models
+      - HF_HOME=/models
+    networks:
+      - translator_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:11434/v1/models > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # =============================================================================
+  # TRANSLATION AGENT (LiveKit Python Agent)
+  # =============================================================================
+  
+  translator_agent:
+    build:
+      context: ./translator_agent
+    env_file:
+      - .env
+    environment:
+      - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-no-key-needed}
+      - TTS_MODE=${TTS_MODE:-cpu}
+      - PARAKEET_BASE_URL=http://parakeet:5092/v1
+      - KOKORO_BASE_URL=http://kokoro:8880/v1
+      - LLAMA_BASE_URL=http://llama_cpp:11434/v1
+      - LLAMA_MODEL=${LLAMA_MODEL:-qwen3-4b}
+    depends_on:
+      livekit:
+        condition: service_started
+      parakeet:
+        condition: service_healthy
+      kokoro:
+        condition: service_started
+      llama_cpp:
+        condition: service_healthy
+    networks:
+      - translator_network
+    restart: unless-stopped
+
+  # =============================================================================
+  # FRONTEND (Next.js Web UI)
+  # =============================================================================
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - NEXT_PUBLIC_LIVEKIT_URL=${NEXT_PUBLIC_LIVEKIT_URL:-ws://localhost:7880}
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
+    depends_on:
+      livekit:
+        condition: service_started
+    networks:
+      - translator_network
+    restart: unless-stopped
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+
+volumes:
+  parakeet-models:
+    name: translator-parakeet-models
+  llama-models:
+    name: translator-llama-models
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+
+networks:
+  translator_network:
+    driver: bridge

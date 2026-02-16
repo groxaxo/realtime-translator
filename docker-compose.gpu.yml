@@ -1,0 +1,105 @@
+# GPU Overlay for Realtime Translator
+# Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+
+services:
+  # =============================================================================
+  # AURALIS TTS (GPU Mode - Premium Quality)
+  # =============================================================================
+  
+  auralis:
+    build:
+      context: ../Auralis-Enhanced
+      dockerfile: Dockerfile
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "9950"
+      - --model
+      - AstraMindAI/xttsv2
+      - --gpt_model
+      - AstraMindAI/xtts2-gpt
+      - --max_concurrency
+      - "4"
+      - --inactivity_timeout
+      - "600"
+    ports:
+      - "9950:9950"
+    volumes:
+      - auralis-models:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    networks:
+      - translator_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9950/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # =============================================================================
+  # PARAKEET STT (GPU Mode)
+  # =============================================================================
+  
+  parakeet:
+    build:
+      context: ../parakeet-tdt-0.6b-v3-fastapi-openai
+      dockerfile: Dockerfile.gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+  # =============================================================================
+  # LLAMA.CPP (GPU Mode)
+  # =============================================================================
+  
+  llama_cpp:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - LLAMA_ARG_N_GPU_LAYERS=${LLAMA_N_GPU_LAYERS:-35}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+  # =============================================================================
+  # TRANSLATOR AGENT (GPU Mode - Uses Auralis)
+  # =============================================================================
+  
+  translator_agent:
+    environment:
+      - TTS_MODE=gpu
+      - AURALIS_BASE_URL=http://auralis:9950/v1
+    depends_on:
+      auralis:
+        condition: service_healthy
+
+# =============================================================================
+# ADDITIONAL VOLUMES FOR GPU MODE
+# =============================================================================
+
+volumes:
+  auralis-models:
+    name: translator-auralis-models

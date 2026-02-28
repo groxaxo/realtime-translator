@@ -39,14 +39,14 @@ def detect_language(text: str) -> Literal["en", "es"]:
         'en' for English, 'es' for Spanish
     """
     text_lower = text.lower()
-    words = set(re.findall(r'\b\w+\b', text_lower))
+    words = re.findall(r"\b\w+\b", text_lower)
     
     # Check for Spanish-specific characters
     if any(char in text_lower for char in SPANISH_CHARS):
         return "es"
     
     # Check for Spanish words
-    spanish_word_count = len(words & SPANISH_INDICATORS)
+    spanish_word_count = sum(1 for word in words if word in SPANISH_INDICATORS)
     spanish_ratio = spanish_word_count / max(len(words), 1)
     
     # If more than 20% of words are Spanish indicators, classify as Spanish
@@ -128,5 +128,5 @@ You ONLY output the translation - no explanations, no commentary, no quotes arou
             ]
         )
         
-        translated = response.choices[0].message.content.strip()
+        translated = (response.choices[0].message.content or "").strip()
         return format_for_tts(translated, target_lang)
